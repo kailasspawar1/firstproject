@@ -1,0 +1,55 @@
+--- Upgrade SQLCLR Assemblies After .NET Framework Update
+
+Workaround: To fix this issue, do the following:
+Exit the DQS client.
+Using SQL Server Management Studio, run the following SQL statements against the DQS_MAIN database. In the SQL statements below, replace $(NETAssemblies) according to your OS type:
+For 32-bit OS: Replace with %Windir%\Microsoft.NET\Framework\v4.0.30319.
+For 64-bit OS: Replace with %Windir%\Microsoft.NET\Framework64\v4.0.30319. Note: In both cases, %Windir% should be replaced with the environmental variable value (c:\windows, for instance).
+
+
+BEGIN
+DECLARE @AssemblyName NVARCHAR(200), @RefreshCmd nvarchar(200), @ErrMsg nvarchar(200)
+
+DECLARE ASSEMBLY_CURSOR CURSOR FOR
+SELECT name as NAME
+from sys.assemblies
+where name not like '%ssdqs%'
+and name not like '%microsoft.sqlserver.types%'
+and name not like '%practices%'
+and name not like '%office%'
+and name not like '%stdole%'
+and name not like '%Microsoft.Vbe.Interop%'
+
+OPEN ASSEMBLY_CURSOR
+
+FETCH NEXT FROM ASSEMBLY_CURSOR
+INTO @AssemblyName
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+BEGIN TRY
+SET @RefreshCmd = 'ALTER ASSEMBLY [' + @AssemblyName + '] FROM ''' +
+'$(NETAssemblies)\' + @AssemblyName + '.dll' +
+''' WITH PERMISSION_SET = UNSAFE'
+EXEC sp_executesql @RefreshCmd
+print 'Successfully upgraded assembly ''' + @AssemblyName + ''''
+END TRY
+BEGIN CATCH
+IF ERROR_NUMBER() != 6285
+BEGIN
+SET @ErrMsg = ERROR_MESSAGE()
+PRINT 'Failed refreshing assembly ' + @AssemblyName + '. Error message: ' + @ErrMsg
+END
+END CATCH
+
+FETCH NEXT FROM ASSEMBLY_CURSOR
+INTO @AssemblyName
+
+END
+
+CLOSE ASSEMBLY_CURSOR
+DEALLOCATE ASSEMBLY_CURSOR
+END
+
+Restart the SQL Server service.
+Start the DQS client. 

@@ -1,0 +1,105 @@
+-- Pull DB details for SQL migration 
+
+
+set nocount on
+
+declare  @ssis varchar(500)
+declare @ssrs varchar(500)
+declare @ssas varchar (500)
+declare @BIServices varchar(5000)
+create table #ssis(SSIS varchar(500)) 
+create table #SSRS(SSRS varchar(500)) 
+create table #SSAS(SSAS varchar(500)) 
+insert into #ssis 
+exec master..xp_cmdshell 'wmic service where "name Like ''%MsDts%''" get Name , State, startmode'
+insert into #SSRS 
+exec master..xp_cmdshell 'wmic service where "name Like ''%ReportServer%''" get Name , State, startmode'
+insert into #SSAS 
+exec master..xp_cmdshell 'wmic service where "name Like ''%OLAP%''" get Name , State, startmode'
+select top 1 @ssis='SSIS Status: '+SSIS+', '  from #ssis where SSIS not like '%StartMode%'
+select top 1 @ssrs ='SSRS Status: '+SSRS+', '  from #SSRS where SSRS not like '%StartMode%'
+select top 1 @ssas ='SSAS Status: '+SSAS from #SSAS where SSAS not like '%StartMode%'
+
+set @BIServices= @ssis  + @ssrs + @ssas 
+--select @BIServices
+drop table #ssis 
+drop table #SSRS 
+drop table #SSAS 
+
+declare @SQLAcount varchar(500)
+declare @count int
+SELECT @count =COUNT(1)  FROM sys.server_principals WHERE TYPE = 'S' and name not like '%##%'
+if @count  > 0
+begin 
+set @SQLAcount ='Yes, SQL Accounts are exist'
+end
+else 
+begin
+set @SQLAcount ='Yes, SQL Accounts are not exist'
+end
+
+declare @SQLJob varchar(500)
+declare @Jobcount int
+SELECT @Jobcount =COUNT(1)  FROM msdb..sysjobs 
+if @Jobcount   > 0
+begin 
+set @SQLJob ='Yes, SQL Agent Jobs are exist'
+end
+else 
+begin
+set @SQLJob ='Yes, SQL Agent Jobs are not exist'
+end
+
+
+CREATE TABLE [#DB_SPACE]
+(
+   [Database_Name]       VARCHAR(60),
+   [Logical_FileID]      VARCHAR(3),
+   [Logical_File_Name]   VARCHAR(60),
+   [OS_File_Name]        VARCHAR(100),
+   [Allocated_Size(MB)]  DECIMAL(10,2),
+   [Used(MB)]            DECIMAL(10,2),
+   [Used%]               DECIMAL(10,2)
+)
+declare @cnt int 
+select @cnt=COUNT(1) from sys.sysdatabases where dbid > 4
+
+EXEC sp_MSforeachdb 'SET NOCOUNT ON USE [?]
+INSERT INTO [#DB_SPACE]
+SELECT CAST (DB_NAME() AS VARCHAR(60)) ''Database_Name'',
+       CAST (FILEID AS VARCHAR(3)) ''Logical_FileID'',
+       CAST (NAME AS VARCHAR(60)) ''Logical_File_Name'',
+       CAST (FILENAME AS VARCHAR(80)) ''OS_File_Name'',
+       CAST(((SIZE)/128.0) AS VARCHAR(15)) ''Allocated_Size(MB)'',
+       CAST((CAST(FILEPROPERTY(NAME, ''SpaceUsed'')/128.0 as DECIMAL(12,2))) AS VARCHAR(15)) ''Used(MB)'',
+       CAST((CAST((CAST(FILEPROPERTY(NAME, ''SpaceUsed'')/128.0 as DECIMAL(12,2))/((SIZE)/128.0)) as DECIMAL(12,2)) * 100) AS VARCHAR(10)) ''Used%''
+FROM [?].dbo.sysfiles
+WHERE (((SIZE)/128.0) > 0) AND ((CAST(FILEPROPERTY(NAME, ''SpaceUsed'')/128.0 as DECIMAL(12,0))) > 0)
+ORDER BY GROUPID DESC, FILEID ASC'
+select database_name,sum([allocated_size(MB)]) AllocatedSize,sum([used(MB)]) UsedSpace into #datafile from [#DB_SPACE] where logical_fileID<>2 group by database_name
+select database_name,sum([allocated_size(MB)]) AllocatedSize,sum([used(MB)]) UsedSpace into #logfile from [#DB_SPACE] where logical_fileID=2 group by database_name
+
+select HOST_NAME () [Server Name], @@servername as [Instance Name], @@VERSION [SQL Version],
+CASE 
+     WHEN CONVERT(VARCHAR(128), SERVERPROPERTY ('productversion')) like '8%' THEN 'SQL2000'
+     WHEN CONVERT(VARCHAR(128), SERVERPROPERTY ('productversion')) like '9%' THEN 'SQL2005'
+     WHEN CONVERT(VARCHAR(128), SERVERPROPERTY ('productversion')) like '10.0%' THEN 'SQL2008'
+     WHEN CONVERT(VARCHAR(128), SERVERPROPERTY ('productversion')) like '10.5%' THEN 'SQL2008 R2'
+     WHEN CONVERT(VARCHAR(128), SERVERPROPERTY ('productversion')) like '11%' THEN 'SQL2012'
+     WHEN CONVERT(VARCHAR(128), SERVERPROPERTY ('productversion')) like '12%' THEN 'SQL2014'
+     WHEN CONVERT(VARCHAR(128), SERVERPROPERTY ('productversion')) like '13%' THEN 'SQL2016'     
+     ELSE 'unknown'
+  END AS [SQL Version],
+ SERVERPROPERTY('ProductLevel') AS [SQL Service Pack],
+  SERVERPROPERTY('Edition') AS Edition,
+  SERVERPROPERTY('ProductVersion') AS [SQL Build Number],
+@cnt [Number Of Databases],
+d.database_name,d.AllocatedSize as DataAllocated,
+l.AllocatedSize as LogAllocated, @BIServices 'SSIS SSRS SSAS Service Status', @SQLAcount [SQL Account], @SQLJob [SQL Agent Job] from #datafile  d
+inner join #logfile l on d.database_name=l.database_name 
+where d.database_Name not in ('master','model','msdb','tempdb','SQLMonitor')
+
+drop table [#DB_SPACE]
+drop table #datafile
+drop table #logfile
+

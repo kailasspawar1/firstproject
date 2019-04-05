@@ -1,0 +1,188 @@
+Scenario: 
+=========
+
+1. All of a sudden prod cluster server is down, RDP not connecting, ping no response. switch on the server which was down through the help of datacenter oncal (physical Server) performed preliminary health check, everything looks good
+
+2. What made server down..?
+
+Key logs to review:
+==================
+
+1. Application Event log.
+2. System Event log
+3. Cluster log provided server is part of cluster 
+4. SQL server Errorlog 
+
+
+Troubleshooting:
+===============
+
+> Checked the previous SQL server log is clean or not 
+  
+	> If SQL server is shutdown is clean, You can see below error message
+                    " SQL Server is terminating in response to a 'stop' request from Service Control Manager. This is an 		      informational message only. No user action is required."
+
+	> If not you can see below similar message
+			Log Name:      System
+			Source:        Microsoft-Windows-WER-SystemErrorReporting
+			Date:          10/26/2014 9:27:20 PM
+			Event ID:      1001
+			Task Category: None
+			Level:         Error
+			Keywords:      Classic
+			User:          N/A
+			Computer:      XXXXXXX
+			Description:
+			The computer has rebooted from a bugcheck.  The bugcheck was: 0x00000124 (0x0000000000000000, 			0xfffffa808f84e028, 0x00000000bb800000, 0x0000000000000175). A dump was saved in: C:\Windows			\MEMORY.DMP. Report Id: 102614-26769-01.
+
+			Log Name:      System
+			Source:        EventLog
+			Date:          10/26/2014 9:27:20 PM
+			Event ID:      6008
+			Task Category: None
+			Level:         Error
+			Keywords:      Classic
+			User:          N/A
+			Computer:      XXXXXXXXX
+			Description:
+			The previous system shutdown at 8:46:53 PM on ?10/?26/?2014 was unexpected.
+
+Based on above log, it indicated previous shutdown was unexpected and created a bugcheck dump in C:\Windows\MEMORY.DMP
+
+Analyze memory dump by WinDBG:
+=============================
+
+--Analyze memory dump by WinDBG
+
+
+22: kd> !analyze -v
+*******************************************************************************
+*                                                                             *
+*                        Bugcheck Analysis                                    *
+*                                                                             *
+*******************************************************************************
+
+WHEA_UNCORRECTABLE_ERROR (124)
+A fatal hardware error has occurred. Parameter 1 identifies the type of error
+source that reported the error. Parameter 2 holds the address of the
+WHEA_ERROR_RECORD structure that describes the error conditon.
+Arguments:
+Arg1: 0000000000000000, Machine Check Exception
+Arg2: fffffa808f84e028, Address of the WHEA_ERROR_RECORD structure.
+Arg3: 00000000bb800000, High order 32-bits of the MCi_STATUS value.
+Arg4: 0000000000000175, Low order 32-bits of the MCi_STATUS value.
+
+Debugging Details:
+------------------
+
+BUGCHECK_STR:  0x124_GenuineIntel
+DEFAULT_BUCKET_ID:  WIN7_DRIVER_FAULT
+PROCESS_NAME:  msdtc.exe
+CURRENT_IRQL:  f
+ANALYSIS_VERSION: 6.3.9600.16384 (debuggers(dbg).130821-1623) amd64fre
+
+STACK_TEXT: 
+nt!KeBugCheckEx
+hal!HalBugCheckSystem+0x1e3
+nt!WheaReportHwError+0x263
+hal!HalpMcaReportError+0x4c
+hal!HalpMceHandler+0x9e
+hal!HalpMceHandlerWithRendezvous+0x55
+hal!HalHandleMcheck+0x40
+nt!KxMcheckAbort+0x6c
+nt!KiMcheckAbort+0x153
+0x000007fe`e7b05474
+
+
+STACK_COMMAND:  kb
+FOLLOWUP_NAME:  MachineOwner
+MODULE_NAME: GenuineIntel
+IMAGE_NAME:  GenuineIntel
+DEBUG_FLR_IMAGE_TIMESTAMP:  0
+IMAGE_VERSION: 
+FAILURE_BUCKET_ID:  X64_0x124_GenuineIntel_PROCESSOR_CACHE
+BUCKET_ID:  X64_0x124_GenuineIntel_PROCESSOR_CACHE
+
+ANALYSIS_SOURCE:  KM
+FAILURE_ID_HASH_STRING:  km:x64_0x124_genuineintel_processor_cache
+FAILURE_ID_HASH:  {270f58cb-a20a-a72d-6d81-eb8c82f01f7a}
+Followup: MachineOwner
+
+
+22: kd> !errrec fffffa808f84e028
+===============================================================================
+Common Platform Error Record @ fffffa808f84e028
+-------------------------------------------------------------------------------
+Record Id     : 01cfe913c3ed8786
+Severity      : Fatal (1)
+Length        : 928
+Creator       : Microsoft
+Notify Type   : Machine Check Exception
+Timestamp     : 10/27/2014 0:47:44 (UTC)
+Flags         : 0x00000000
+
+===============================================================================
+Section 0     : Processor Generic
+-------------------------------------------------------------------------------
+Descriptor    @ fffffa808f84e0a8
+Section       @ fffffa808f84e180
+Offset        : 344
+Length        : 192
+Flags         : 0x00000001 Primary
+Severity      : Fatal
+
+Proc. Type    : x86/x64
+Instr. Set    : x64
+Error Type    : Cache error
+Operation     : Generic
+Flags         : 0x00
+Level         : 1
+CPU Version   : 0x00000000000206d7
+Processor ID  : 0x0000000000000026
+
+===============================================================================
+Section 1     : x86/x64 Processor Specific
+-------------------------------------------------------------------------------
+Descriptor    @ fffffa808f84e0f0
+Section       @ fffffa808f84e240
+Offset        : 536
+Length        : 128
+Flags         : 0x00000000
+Severity      : Fatal
+
+Local APIC Id : 0x0000000000000026
+CPU Id        : d7 06 02 00 00 08 20 26 - ff e3 be 1f ff fb eb bf
+                00 00 00 00 00 00 00 00 - 00 00 00 00 00 00 00 00
+                00 00 00 00 00 00 00 00 - 00 00 00 00 00 00 00 00
+
+Proc. Info 0  @ fffffa808f84e240
+
+===============================================================================
+Section 2     : x86/x64 MCA
+-------------------------------------------------------------------------------
+Descriptor    @ fffffa808f84e138
+Section       @ fffffa808f84e2c0
+Offset        : 664
+Length        : 264
+Flags         : 0x00000000
+Severity      : Fatal
+
+Error         : DCACHEL1_EVICT_ERR (Proc 22 Bank 1)
+  Status      : 0xbb80000000000175
+
+Cause:
+
+There was fatal\unrecoverable hardware error while evicting data from Processor L1 Cache.
+
+More Info:
+DCACHEL1_DRD_ERR - Cache L1 - Data Read - Error
+DCACHEL1_DWR_ERR - Cache L1 - Data Write - Error
+DCACHEL1_EVICT_ERR - Cache L1 - Data Evict - Error
+
+Recommendation:
+
+Please execute dry test on hardware components, also check for driver\firmware issues.
+We see this type of issues while CPU overheating\ over clocking. Ensure, we limit to thresholds provided by vendor.
+
+
+
